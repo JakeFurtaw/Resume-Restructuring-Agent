@@ -1,24 +1,22 @@
 from abc import ABC
 from llama_index.core.agent import AgentRunner, CustomSimpleAgentWorker
 from llama_index.llms.ollama import Ollama
-from llama_index.core import SimpleDirectoryReader, Document
+from llama_index.core import SimpleDirectoryReader
 from llama_parse import LlamaParse
 from llama_index.core.tools import FunctionTool
 import os
-from fpdf import FPDF
-from datetime import datetime
 
 # Initialize LLMs
-runner_llm = Ollama(model="mistral-nemo:latest")
-worker_llm = Ollama(model="gemma2:2b")
+runner_llm = Ollama(model="mistral-nemo:latest", request_timeout=60)
+worker_llm = Ollama(model="gemma2:2b", request_timeout=60)
 
 # Initialize LlamaParse for parsing resumes
-llama_parse = LlamaParse()
+llama_parse = LlamaParse(api_key="")
 
 
 def read_files_from_data_directory():
     """Read resume and job description files from the 'data' directory."""
-    reader = SimpleDirectoryReader(input_dir="./data")
+    reader = SimpleDirectoryReader(input_dir="data")
     documents = reader.load_data()
     resume_doc = next((doc for doc in documents if doc.metadata['file_name'].lower().endswith('.pdf')), None)
     job_description_doc = next((doc for doc in documents if doc.metadata['file_name'].lower().endswith('.txt')), None)
@@ -57,28 +55,14 @@ def restructure_resume(resume: str, job_description: str) -> str:
 
 def write_resume_to_file(resume_content: str) -> str:
     """Write the resume content to a text file."""
-    output_dir = "./output"
+    output_dir = "output"
     os.makedirs(output_dir, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    file_name = f"restructured_resume_{timestamp}.txt"
+
+    file_name = f"restructured_resume.txt"
     file_path = os.path.join(output_dir, file_name)
     with open(file_path, "w") as f:
         f.write(resume_content)
     return file_path
-
-
-def create_pdf_from_text(text_file_path: str) -> str:
-    """Create a PDF file from the given text file."""
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", size=12)
-    with open(text_file_path, "r") as f:
-        for line in f:
-            pdf.cell(0, 10, txt=line.strip(), ln=True)
-    pdf_file_path = text_file_path.rsplit(".", 1)[0] + ".pdf"
-    pdf.output(pdf_file_path)
-    return pdf_file_path
-
 
 # Define tools for the agent
 tools = [
@@ -86,7 +70,6 @@ tools = [
     FunctionTool.from_defaults(fn=parse_resume),
     FunctionTool.from_defaults(fn=restructure_resume),
     FunctionTool.from_defaults(fn=write_resume_to_file),
-    FunctionTool.from_defaults(fn=create_pdf_from_text),
 ]
 
 
@@ -104,10 +87,20 @@ class ResumeWorkerAgent(CustomSimpleAgentWorker, ABC):
                                             {"resume": parsed_resume, "job_description": job_description_doc.text})
         # Write the restructured resume to a text file
         text_file_path = self.run_tool("write_resume_to_file", {"resume_content": restructured_resume})
-        # Create a PDF from the text file
-        pdf_file_path = self.run_tool("create_pdf_from_text", {"text_file_path": text_file_path})
-        return f"Restructured resume saved as text file: {text_file_path}\nPDF version saved as: {pdf_file_path}"
+        return f"Restructured resume saved as text file: {text_file_path}"
 
+    def _initialize_state(self):
+        # Initialize any state needed for the agent
+        pass
+
+    def _run_step(self, state):
+        # This method is not used in our implementation
+        # as we're using execute_task instead
+        pass
+
+    def _finalize_task(self, state):
+        # Finalize the task if needed
+        pass
 
 # Create the agent runner
 agent_runner = AgentRunner.from_llm(
@@ -117,6 +110,6 @@ agent_runner = AgentRunner.from_llm(
 
 # Example usage
 if __name__ == "__main__":
-    task_description = "Parse the resume, read the job description, restructure the resume, and save it as both text and PDF files."
+    task_description = "Review the resume and read the job description, restructure the supplied resume keeping the same sections and relevant details but remove or adding any details needed or not need for the job, and save it as a text."
     result = agent_runner.chat(task_description)
     print(result.response)
